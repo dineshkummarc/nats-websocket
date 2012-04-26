@@ -1,20 +1,21 @@
-# Node_Nats
+# NATS Websocket
 
-A Node.js client for the [NATS messaging system](https://github.com/derekcollison/nats).
+A NATS [NATS messaging system](https://github.com/derekcollison/nats) client for the browser. It connects to NATS through a simple websocket proxy.
 
-[![Build Status](https://secure.travis-ci.org/derekcollison/node_nats.png)](http://travis-ci.org/derekcollison/node_nats)
+It's a simple fork of [node_nats](https://github.com/derekcollison/node_nats) with some utility code from Node.js.
 
 ## Installation
 
-```bash
-npm install nats
-```
+Drop [EventEmitter.js](https://github.com/Wolfy87/EventEmitter) and
+nats-websocket-min.js on your webserver and include the approprite script
+tags. You'll also need to run a websocket <-> NATS proxy. A simple
+example is included in proxy.rb. 
 
 ## Basic Usage
 
 ```javascript
 
-var nats = require('nats').connect();
+var nats = NATS.connect();
 
 // Simple Publisher
 nats.publish('foo', 'Hello World!');
