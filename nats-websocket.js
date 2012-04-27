@@ -1659,6 +1659,7 @@ var NATS = (function(){
     if (opt_callback !== undefined) {
       this.flush(opt_callback);
     }
+    return this;
   };
 
   /**

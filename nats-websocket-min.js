@@ -143,7 +143,8 @@ opt_callback=msg;msg=EMPTY;opt_reply=undefined;}
 if(typeof opt_reply==='function'){if(opt_callback){throw(new Error("Reply can't be a function"));}
 opt_callback=opt_reply;opt_reply=undefined;}
 var proto=[PUB,subject];var pmsg=[byteLength(msg),CR_LF,msg,CR_LF];if(opt_reply!==undefined){proto.push(opt_reply);}
-this.sendCommand(proto.concat(pmsg.join(EMPTY)).join(SPC));if(opt_callback!==undefined){this.flush(opt_callback);}};Client.prototype.subscribe=function(subject,opts,callback){var qgroup,max;if(typeof opts==='function'){callback=opts;opts=null;}else if(opts&&typeof opts==='object'){qgroup=opts.queue;max=opts.max;}
+this.sendCommand(proto.concat(pmsg.join(EMPTY)).join(SPC));if(opt_callback!==undefined){this.flush(opt_callback);}
+return this;};Client.prototype.subscribe=function(subject,opts,callback){var qgroup,max;if(typeof opts==='function'){callback=opts;opts=null;}else if(opts&&typeof opts==='object'){qgroup=opts.queue;max=opts.max;}
 this.ssid+=1;this.subs[this.ssid]={'subject':subject,'callback':callback,'received':0};var proto;if(typeof qgroup==='string'){this.subs[this.ssid].qgroup=qgroup;proto=[SUB,subject,qgroup,this.ssid+CR_LF];}else{proto=[SUB,subject,this.ssid+CR_LF];}
 this.sendCommand(proto.join(SPC));if(max){this.unsubscribe(this.ssid,max);}
 return this.ssid;};Client.prototype.unsubscribe=function(sid,opt_max){if(!sid){return;}
