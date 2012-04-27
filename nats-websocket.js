@@ -19,6 +19,220 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+// Query String Utilities
+
+var QueryString = (function( ){
+  var QueryString = {};
+  var urlDecode   = decodeURI;
+
+
+  // If obj.hasOwnProperty has been overridden, then calling
+  // obj.hasOwnProperty(prop) will break.
+  // See: https://github.com/joyent/node/issues/1707
+  function hasOwnProperty(obj, prop) {
+    return Object.prototype.hasOwnProperty.call(obj, prop);
+  }
+
+
+  function charCode(c) {
+    return c.charCodeAt(0);
+  }
+
+
+  // a safe fast alternative to decodeURIComponent
+  QueryString.unescapeBuffer = function(s, decodeSpaces) {
+    var out = new Buffer(s.length);
+    var state = 'CHAR'; // states: CHAR, HEX0, HEX1
+    var n, m, hexchar;
+
+    for (var inIndex = 0, outIndex = 0; inIndex <= s.length; inIndex++) {
+      var c = s.charCodeAt(inIndex);
+      switch (state) {
+        case 'CHAR':
+          switch (c) {
+            case charCode('%'):
+              n = 0;
+              m = 0;
+              state = 'HEX0';
+              break;
+            case charCode('+'):
+              if (decodeSpaces) c = charCode(' ');
+              // pass thru
+            default:
+              out[outIndex++] = c;
+              break;
+          }
+          break;
+
+        case 'HEX0':
+          state = 'HEX1';
+          hexchar = c;
+          if (charCode('0') <= c && c <= charCode('9')) {
+            n = c - charCode('0');
+          } else if (charCode('a') <= c && c <= charCode('f')) {
+            n = c - charCode('a') + 10;
+          } else if (charCode('A') <= c && c <= charCode('F')) {
+            n = c - charCode('A') + 10;
+          } else {
+            out[outIndex++] = charCode('%');
+            out[outIndex++] = c;
+            state = 'CHAR';
+            break;
+          }
+          break;
+
+        case 'HEX1':
+          state = 'CHAR';
+          if (charCode('0') <= c && c <= charCode('9')) {
+            m = c - charCode('0');
+          } else if (charCode('a') <= c && c <= charCode('f')) {
+            m = c - charCode('a') + 10;
+          } else if (charCode('A') <= c && c <= charCode('F')) {
+            m = c - charCode('A') + 10;
+          } else {
+            out[outIndex++] = charCode('%');
+            out[outIndex++] = hexchar;
+            out[outIndex++] = c;
+            break;
+          }
+          out[outIndex++] = 16 * n + m;
+          break;
+      }
+    }
+
+    // TODO support returning arbitrary buffers.
+
+    return out.slice(0, outIndex - 1);
+  };
+
+
+  QueryString.unescape = function(s, decodeSpaces) {
+    return QueryString.unescapeBuffer(s, decodeSpaces).toString();
+  };
+
+
+  QueryString.escape = function(str) {
+    return encodeURIComponent(str);
+  };
+
+  var stringifyPrimitive = function(v) {
+    switch (typeof v) {
+      case 'string':
+        return v;
+
+      case 'boolean':
+        return v ? 'true' : 'false';
+
+      case 'number':
+        return isFinite(v) ? v : '';
+
+      default:
+        return '';
+    }
+  };
+
+
+  QueryString.stringify = QueryString.encode = function(obj, sep, eq, name) {
+    sep = sep || '&';
+    eq = eq || '=';
+    obj = (obj === null) ? undefined : obj;
+
+    switch (typeof obj) {
+      case 'object':
+        return Object.keys(obj).map(function(k) {
+          if (Array.isArray(obj[k])) {
+            return obj[k].map(function(v) {
+              return QueryString.escape(stringifyPrimitive(k)) +
+                     eq +
+                     QueryString.escape(stringifyPrimitive(v));
+            }).join(sep);
+          } else {
+            return QueryString.escape(stringifyPrimitive(k)) +
+                   eq +
+                   QueryString.escape(stringifyPrimitive(obj[k]));
+          }
+        }).join(sep);
+
+      default:
+        if (!name) return '';
+        return QueryString.escape(stringifyPrimitive(name)) + eq +
+               QueryString.escape(stringifyPrimitive(obj));
+    }
+  };
+
+  // Parse a key=val string.
+  QueryString.parse = QueryString.decode = function(qs, sep, eq, options) {
+    sep = sep || '&';
+    eq = eq || '=';
+    var obj = {},
+        maxKeys = 1000;
+
+    // Handle maxKeys = 0 case
+    if (options && typeof options.maxKeys === 'number') {
+      maxKeys = options.maxKeys;
+    }
+
+    if (typeof qs !== 'string' || qs.length === 0) {
+      return obj;
+    }
+
+    var regexp = /\+/g;
+    qs = qs.split(sep);
+
+    // maxKeys <= 0 means that we should not limit keys count
+    if (maxKeys > 0) {
+      qs = qs.slice(0, maxKeys);
+    }
+
+    for (var i = 0, len = qs.length; i < len; ++i) {
+      var x = qs[i].replace(regexp, '%20'),
+          idx = x.indexOf(eq),
+          kstr = x.substring(0, idx),
+          vstr = x.substring(idx + 1), k, v;
+
+      try {
+        k = decodeURIComponent(kstr);
+        v = decodeURIComponent(vstr);
+      } catch (e) {
+        k = QueryString.unescape(kstr, true);
+        v = QueryString.unescape(vstr, true);
+      }
+
+      if (!hasOwnProperty(obj, k)) {
+        obj[k] = v;
+      } else if (!Array.isArray(obj[k])) {
+        obj[k] = [obj[k], v];
+      } else {
+        obj[k].push(v);
+      }
+    }
+
+    return obj;
+  };
+
+  return QueryString;
+})();
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
 
 if(typeof url == "undefined") {
   var url = (function(){
@@ -847,3 +1061,747 @@ if(typeof url == "undefined") {
   })();
 }
 
+/*!
+ * Nats
+ * Copyright(c) 2011,2012 Derek Collison (derek.collison@gmail.com)
+ * MIT Licensed
+ */
+
+var NATS = (function(){
+  if (typeof EventEmitter != 'function') {
+    console.error('The EventEmitter library (https://github.com/Wolfy87/EventEmitter) is required');
+    return;
+  }
+  if (typeof url != 'object') {
+    console.error('The url library is required');
+    return;
+  }
+
+  /**
+   * Constants
+   */
+
+  var VERSION = '0.2.7',
+
+      DEFAULT_PORT = 4222,
+      DEFAULT_PRE  = 'nats://localhost:',
+      DEFAULT_URI  =  DEFAULT_PRE + DEFAULT_PORT,
+
+      MAX_CONTROL_LINE_SIZE = 512,
+
+      // Parser state
+      AWAITING_CONTROL = 0,
+      AWAITING_MSG_PAYLOAD = 1,
+
+      // Reconnect Parameters, 2 sec wait, 10 tries
+      DEFAULT_RECONNECT_TIME_WAIT = 2*1000,
+      DEFAULT_MAX_RECONNECT_ATTEMPTS = 10,
+
+      // Protocol
+      CONTROL_LINE = /^(.*)\r\n/,
+
+      MSG  = /^MSG\s+([^\s\r\n]+)\s+([^\s\r\n]+)\s+(([^\s\r\n]+)[^\S\r\n]+)?(\d+)\r\n/i,
+      OK   = /^\+OK\s*\r\n/i,
+      ERR  = /^-ERR\s+('.+')?\r\n/i,
+      PING = /^PING\r\n/i,
+      PONG = /^PONG\r\n/i,
+      INFO = /^INFO\s+([^\r\n]+)\r\n/i,
+
+      CR_LF = '\r\n',
+      CR_LF_LEN = CR_LF.length,
+      EMPTY = '',
+      SPC = ' ',
+
+      // Protocol
+      PUB     = 'PUB',
+      SUB     = 'SUB',
+      UNSUB   = 'UNSUB',
+      CONNECT = 'CONNECT',
+
+      // Responses
+      PING_REQUEST  = 'PING' + CR_LF,
+      PONG_RESPONSE = 'PONG' + CR_LF,
+
+      EMPTY = '',
+
+      // Pedantic Mode support
+      Q_SUB = /^([^\.\*>\s]+|>$|\*)(\.([^\.\*>\s]+|>$|\*))*$/,
+      Q_SUB_NO_WC = /^([^\.\*>\s]+)(\.([^\.\*>\s]+))*$/,
+
+      FLUSH_THRESHOLD = 65536;
+
+  /**
+   * Library Version
+   */
+
+
+  /**
+   * Generate random hex strings for createInbox.
+   *
+   * @api private
+  */
+
+  function hexRand(limit) {
+    return (parseInt(Math.random()*limit, 16).toString(16));
+  }
+
+  /**
+   * Replacement for Buffer.byteLength
+   * @see http://stackoverflow.com/a/2858850/1020416
+   *
+   * @api private
+  */
+
+  function byteLength ( str ) {
+    return unescape(encodeURIComponent(str)).length;
+  }
+
+  /**
+   * Node.js util.inherit
+   *
+   * @api private
+  */
+
+  function inherits(ctor, superCtor) {
+    ctor.super_ = superCtor;
+    ctor.prototype = Object.create(superCtor.prototype, {
+      constructor: {
+        value: ctor,
+        enumerable: false,
+        writable: true,
+        configurable: true
+      }
+    });
+  };
+
+  /**
+   * Create a properly formatted inbox subject.
+   *
+   * @api public
+  */
+
+  var createInbox = function() {
+    return ('_INBOX.' +
+            hexRand(0x0010000) +
+            hexRand(0x0010000) +
+            hexRand(0x0010000) +
+            hexRand(0x0010000) +
+            hexRand(0x1000000));
+  };
+
+  /**
+   * Initialize a client with the appropriate options.
+   *
+   * @param {Mixed} opts
+   * @api public
+   */
+
+  function Client(opts, listeners) {
+    EventEmitter.call(this);
+    this.parseOptions(opts);
+    this.addListeners(listeners);
+    this.initState();
+    this.createConnection();
+  }
+
+  /**
+   * Connect to a nats-server and return the client.
+   * Argument can be a url, or an object with a 'url'
+   * property and additional options.
+   *
+   * @params {Mixed} opts
+   *
+   * @api public
+   */
+
+  var connect = function(opts, listeners) {
+    return new Client(opts, listeners);
+  };
+
+  /**
+   * Connected clients are event emitters.
+   */
+
+  inherits(Client, EventEmitter);
+
+  /**
+   * Allow createInbox to be called on a client.
+   *
+   * @api public
+   */
+
+  Client.prototype.createInbox = createInbox;
+
+  Client.prototype.assignOption = function(opts, prop, assign) {
+    if (assign === undefined) {
+      assign = prop;
+    }
+    if (opts[prop] !== undefined) {
+      this.options[assign] = opts[prop];
+    }
+  };
+
+  /**
+   * Parse the conctructor/connect options.
+   *
+   * @param {Mixed} opts
+   * @api private
+   */
+
+  Client.prototype.parseOptions = function(opts) {
+    var options = this.options = {
+      'url'                  : DEFAULT_URI,
+      'verbose'              : false,
+      'pedantic'             : false,
+      'reconnect'            : true,
+      'maxReconnectAttempts' : DEFAULT_MAX_RECONNECT_ATTEMPTS,
+      'reconnectTimeWait'    : DEFAULT_RECONNECT_TIME_WAIT,
+      'path'                 : '/nats'
+    };
+    if ('number' === typeof opts) {
+      options.url = DEFAULT_PRE + opts;
+    } else if ('string' === typeof opts) {
+      options.url = opts;
+    } else if ('object' === typeof opts) {
+      if (opts.port !== undefined) {
+        options.url = DEFAULT_PRE + opts.port;
+      }
+      // Pull out various options here
+      this.assignOption(opts, 'url');
+      this.assignOption(opts, 'uri', 'url');
+      this.assignOption(opts, 'user');
+      this.assignOption(opts, 'pass');
+      this.assignOption(opts, 'password', 'pass');
+      this.assignOption(opts, 'verbose');
+      this.assignOption(opts, 'pedantic');
+      this.assignOption(opts, 'reconnect');
+      this.assignOption(opts, 'maxReconnectAttempts');
+      this.assignOption(opts, 'reconnectTimeWait');
+      this.assignOption(opts, 'path');
+    }
+    options.uri = options.url;
+
+    if (options.url !== undefined) {
+      // Parse the url
+      this.url = url.parse(options.url);
+      if (this.url.auth !== undefined) {
+        var auth = this.url.auth.split(':');
+        if (options.user === undefined) {
+          options.user = auth[0];
+        }
+        if (options.pass === undefined) {
+          options.pass = auth[1];
+        }
+      }
+    }
+  };
+
+  /**
+   * Initialize listners passed in during construction
+   *
+   * @api private
+  */
+  Client.prototype.addListeners = function(list) {
+    if('object' != typeof list){
+      console.error("listeners must be an Object");
+      return;
+    }
+    var events = ['connect', 'disconnect', 'error', 'close']
+    for(e in events) {
+      if('function' == typeof list[events[e]])
+        this.addListener(events[e], list[events[e]])
+    }
+  }
+
+  /**
+   * Properly setup a stream connection with proper events.
+   *
+   * @api private
+  */
+
+  Client.prototype.createConnection = function() {
+    var client = this;
+
+    client.pongs   = [];
+    client.pending = [];
+    client.pSize   = 0;
+    client.pstate  = AWAITING_CONTROL;
+
+    var scheme    = (window.location.protocol || document.location.protocol) == "https:" ? 'wss://' : 'ws://';
+    var stream    = new WebSocket(scheme + window.location.host + client.options.path);
+    client.stream = stream
+
+    stream.onopen = function() {
+      var wasReconnecting = client.reconnecting;
+      var event = wasReconnecting === true ? 'reconnect' : 'connect';
+      client.connected = true;
+      client.reconnecting = false;
+      client.reconnects = 0;
+      client.flushPending();
+      if (wasReconnecting) {
+        client.sendSubscriptions();
+      }
+      client.flush(function() {
+        client.emit(event, client);
+      });
+    };
+
+    stream.onclose =  function(evt) {
+      client.closeStream();
+      client.emit('disconnect', evt);
+      if (client.closed === true ||
+          client.options.reconnect === false ||
+          client.reconnects >= client.options.maxReconnectAttempts) {
+        client.emit('close');
+      } else {
+        client.scheduleReconnect();
+      }
+    };
+
+    stream.onerror = function(exception) {
+      client.closeStream();
+
+      if (client.reconnecting === false) {
+        client.emit('error', exception);
+      }
+      client.emit('disconnect');
+
+      if (client.reconnecting === true) {
+        if (client.closed === true ||
+            client.reconnects >= client.options.maxReconnectAttempts) {
+          client.emit('close');
+        } else {
+          client.scheduleReconnect();
+        }
+      }
+    };
+
+    stream.onmessage = function (wsmsg) {
+      var data = wsmsg.data
+      var m;
+
+      client.inbound = client.inbound ? client.inbound + data : data;
+
+      while (!client.closed && client.inbound && client.inbound.length > 0) {
+        switch (client.pstate) {
+        case AWAITING_CONTROL:
+          if ((m = MSG.exec(client.inbound)) != null) {
+            client.payload = {
+              subj : m[1],
+              sid : m[2],
+              reply : m[4],
+              size : parseInt(m[5], 10)
+            };
+            client.pstate = AWAITING_MSG_PAYLOAD;
+          } else if ((m = OK.exec(client.inbound)) != null) {
+            // Ignore for now..
+          } else if ((m = ERR.exec(client.inbound)) != null) {
+            client.emit('error', m[1]);
+          } else if ((m = PONG.exec(client.inbound)) != null) {
+            var cb = client.pongs.shift();
+            if (cb) { cb(); } // FIXME: Should we check for exceptions?
+          } else if ((m = PING.exec(client.inbound)) != null) {
+            client.sendCommand(PONG_RESPONSE);
+          } else if ((m = INFO.exec(client.inbound)) != null) {
+            // Ignore for now..
+          } else {
+            // FIXME, check line length for something weird.
+            // Nothing here yet, return
+            return;
+          }
+          break;
+
+        case AWAITING_MSG_PAYLOAD:
+
+          if (client.inbound.length < client.payload.size + CR_LF_LEN) {
+            return;
+          }
+
+          // FIXME, may be inefficient.
+          client.payload.msg = client.inbound.slice(0, client.payload.size).toString();
+
+          if (client.inbound.length === client.payload.size + CR_LF_LEN) {
+            client.inbound = null;
+          } else {
+            client.inbound = client.inbound.slice(client.payload.size + CR_LF_LEN);
+          }
+          // process the message
+          client.processMsg();
+        }
+
+        if (m) {
+          // Chop inbound
+          var psize = m[0].length;
+          if (psize >= client.inbound.length) {
+            client.inbound = null;
+          } else {
+            client.inbound = client.inbound.slice(psize);
+          }
+        }
+        m = null;
+      }
+    };
+
+    // Queue the connect command.
+    var cs = { 'verbose':this.options.verbose, 'pedantic':this.options.pedantic };
+    if (this.options.user !== undefined) {
+      cs.user = this.options.user;
+      cs.pass = this.options.pass;
+    }
+    this.sendCommand(CONNECT + SPC + JSON.stringify(cs) + CR_LF);
+  };
+
+  /**
+   * Initialize client state.
+   *
+   * @api private
+   */
+
+  Client.prototype.initState = function() {
+    this.ssid         = 1;
+    this.subs         = {};
+    this.reconnects   = 0;
+    this.connected    = false;
+    this.reconnecting = false;
+  };
+
+  /**
+   * Close the connection to the server.
+   *
+   * @api public
+   */
+
+  Client.prototype.close = function() {
+    this.closed = true;
+    this.removeAllListeners();
+    this.closeStream();
+    this.ssid     = -1;
+    this.subs     = null;
+    this.pstate   = -1;
+    this.pongs    = null;
+    this.pending  = null;
+    this.pSize    = 0;
+  };
+
+  /**
+   * Close down the stream and clear state.
+   *
+   * @api private
+   */
+
+  Client.prototype.closeStream = function() {
+    if (this.stream != null) {
+      this.stream.close();
+      this.stream  = null;
+    }
+    if (this.connected === true || this.closed === true) {
+      this.pongs     = null;
+      this.pending   = null;
+      this.pSize     = 0;
+      this.connected = false;
+    }
+  };
+
+  /**
+   * Flush all pending data to the server.
+   *
+   * @api private
+   */
+
+  Client.prototype.flushPending = function() {
+    if (this.connected === false ||
+        this.pending == null ||
+        this.pending.length === 0) { return; }
+
+    this.stream.send(this.pending.join(EMPTY));
+    this.pending = [];
+    this.pSize   = 0;
+  };
+
+  /**
+   * Send commands to the server or queue them up if connection pending.
+   *
+   * @api private
+   */
+
+  Client.prototype.sendCommand = function(cmd) {
+    // Buffer to cut down on system calls, increase throughput.
+    // When receive gets faster, should make this Buffer based..
+
+    if (this.closed || this.pending == null) { return; }
+
+    this.pending.push(cmd);
+    this.pSize += byteLength(cmd);
+
+    if (this.connected === true) {
+      // First one let's setup flush..
+      if (this.pending.length === 1) {
+        var self = this;
+        setTimeout(function(){
+          self.flushPending();
+        }, 1);
+      } else if (this.pSize > FLUSH_THRESHOLD) {
+        // Flush in place when threshold reached..
+        this.flushPending();
+      }
+    }
+  };
+
+  /**
+   * Sends existing subscriptions to new server after reconnect.
+   *
+   * @api private
+   */
+
+  Client.prototype.sendSubscriptions = function() {
+    var proto;
+    for(var sid in this.subs) {
+      if (this.subs.hasOwnProperty(sid)) {
+        var sub = this.subs[sid];
+        if (sub.qgroup) {
+    proto = [SUB, sub.subject, sub.qgroup, sid + CR_LF];
+        } else {
+    proto = [SUB, sub.subject, sid + CR_LF];
+        }
+        this.sendCommand(proto.join(SPC));
+      }
+    }
+  };
+
+  /**
+   * Process a delivered message and deliver to appropriate subscriber.
+   *
+   * @api private
+   */
+
+  Client.prototype.processMsg = function() {
+    var sub = this.subs[this.payload.sid];
+    if (sub != null) {
+      sub.received += 1;
+      // Check for a timeout, and cancel if received >= expected
+      if (sub.timeout) {
+        if (sub.received >= sub.expected) {
+          clearTimeout(sub.timeout);
+          sub.timeout = null;
+        }
+      }
+      // Check for auto-unsubscribe
+      if (sub.max !== undefined) {
+        if (sub.received === sub.max) {
+          delete this.subs[this.payload.sid];
+        } else if (sub.received > sub.max) {
+          this.unsubscribe(this.payload.sid);
+          sub.callback = null;
+        }
+      }
+
+      if (sub.callback) {
+        sub.callback(this.payload.msg, this.payload.reply, this.payload.subj);
+      }
+    }
+
+    this.pstate = AWAITING_CONTROL;
+    this.payload = null;
+  };
+
+  /**
+   * Flush outbound queue to server and call optional callback when server has processed
+   * all data.
+   *
+   * @param {Function} opt_callback
+   * @api public
+   */
+
+  Client.prototype.flush = function(opt_callback) {
+    if (typeof opt_callback === 'function') {
+      this.pongs.push(opt_callback);
+      this.sendCommand(PING_REQUEST);
+    }
+  };
+
+  /**
+   * Publish a message to the given subject, with optional reply and callback.
+   *
+   * @param {String} subject
+   * @param {String} msg
+   * @param {String} opt_reply
+   * @param {Function} opt_callback
+   * @api public
+   */
+
+  Client.prototype.publish = function(subject, msg, opt_reply, opt_callback) {
+    if (!msg) { msg = EMPTY; }
+    if (typeof msg === 'function') {
+      if (opt_callback || opt_reply) {
+        throw(new Error("Message can't be a function"));
+      }
+      opt_callback = msg;
+      msg = EMPTY;
+      opt_reply = undefined;
+    }
+    if (typeof opt_reply === 'function') {
+      if (opt_callback) {
+        throw(new Error("Reply can't be a function"));
+      }
+      opt_callback = opt_reply;
+      opt_reply = undefined;
+    }
+
+    var proto = [PUB, subject];
+    var pmsg = [byteLength(msg), CR_LF, msg, CR_LF];
+
+    if (opt_reply !== undefined) {
+      proto.push(opt_reply);
+    }
+
+    this.sendCommand(proto.concat(pmsg.join(EMPTY)).join(SPC));
+
+    if (opt_callback !== undefined) {
+      this.flush(opt_callback);
+    }
+  };
+
+  /**
+   * Subscribe to a given subject, with optional options and callback. opts can be
+   * ommitted, even with a callback. The Subscriber Id is returned.
+   *
+   * @param {String} subject
+   * @param {Object} opts
+   * @param {Function} callback
+   * @return {Mixed}
+   * @api public
+   */
+
+  Client.prototype.subscribe = function(subject, opts, callback) {
+    var qgroup, max;
+    if (typeof opts === 'function') {
+      callback = opts;
+      opts = null;
+    } else if (opts && typeof opts === 'object') {
+      // FIXME, check exists, error otherwise..
+      qgroup = opts.queue;
+      max = opts.max;
+    }
+    this.ssid += 1;
+    this.subs[this.ssid] = { 'subject':subject, 'callback':callback, 'received':0 };
+
+    var proto;
+    if (typeof qgroup === 'string') {
+      this.subs[this.ssid].qgroup = qgroup;
+      proto = [SUB, subject, qgroup, this.ssid + CR_LF];
+    } else {
+      proto = [SUB, subject, this.ssid + CR_LF];
+    }
+    this.sendCommand(proto.join(SPC));
+
+    if (max) {
+      this.unsubscribe(this.ssid, max);
+    }
+    return this.ssid;
+  };
+
+  /**
+   * Unsubscribe to a given Subscriber Id, with optional max parameter.
+   *
+   * @param {Mixed} sid
+   * @param {Number} opt_max
+   * @api public
+   */
+
+  Client.prototype.unsubscribe = function(sid, opt_max) {
+    if (!sid) { return; }
+
+    var proto;
+    if (opt_max) {
+      proto = [UNSUB, sid, opt_max + CR_LF];
+    } else {
+      proto = [UNSUB, sid + CR_LF];
+    }
+    this.sendCommand(proto.join(SPC));
+
+    var sub = this.subs[sid];
+    if (sub == null) {
+      return;
+    }
+    sub.max = opt_max;
+    if (sub.max === undefined || (sub.received >= sub.max)) {
+      delete this.subs[sid];
+    }
+  };
+
+  /**
+   * Set a timeout on a subscription.
+   *
+   * @param {Mixed} sid
+   * @param {Number} timeout
+   * @param {Number} expected
+   * @api public
+   */
+
+  Client.prototype.timeout = function(sid, timeout, expected, callback) {
+    if (!sid) { return; }
+    var sub = this.subs[sid];
+    if (sub == null) { return; }
+    sub.expected = expected;
+    sub.timeout = setTimeout(function() { callback(sid); }, timeout);
+  };
+
+  /**
+   * Publish a message with an implicit inbox listener as the reply. Message is optional.
+   *
+   * @param {String} subject
+   * @param {String} opt_msg
+   * @param {Object} opt_options
+   * @param {Function} callback
+   * @api public
+   */
+
+  Client.prototype.request = function(subject, opt_msg, opt_options, callback) {
+    if (typeof opt_msg === 'function') {
+      callback = opt_msg;
+      opt_msg = EMPTY;
+      opt_options = null;
+    }
+    if (typeof opt_options === 'function') {
+      callback = opt_options;
+      opt_options = null;
+    }
+    var inbox = createInbox();
+    var s = this.subscribe(inbox, opt_options, function(msg, reply) {
+      callback(msg, reply);
+    });
+    this.publish(subject, opt_msg, inbox);
+    return s;
+  };
+
+  /**
+   * Reconnect to the server.
+   *
+   * @api private
+   */
+
+  Client.prototype.reconnect = function() {
+    if (this.closed) { return; }
+    this.reconnects += 1;
+    this.createConnection();
+    this.emit('reconnecting');
+  };
+
+  /**
+   * Setup a timer event to attempt reconnect.
+   *
+   * @api private
+   */
+
+  Client.prototype.scheduleReconnect = function() {
+    var client = this;
+    client.reconnecting = true;
+    setTimeout(function() { client.reconnect(); }, this.options.reconnectTimeWait);
+  };
+
+  return {
+    version: VERSION,
+    createInbox: createInbox,
+    connection: connect
+  }
+})();

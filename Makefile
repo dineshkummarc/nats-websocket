@@ -1,3 +1,5 @@
-dist : lib/punycode.js lib/querystring.js lib/url.js lib/nats-websocket.js
-	cat lib/punycode.js lib/querystring.js lib/url.js lib/nats-websocket.js | jsmin > nats-websocket-min.js
+dist : link 
+	jsmin < nats-websocket.js > nats-websocket-min.js
 
+link : lib/querystring.js lib/url.js lib/nats-websocket.js
+	cat  lib/querystring.js lib/url.js lib/nats-websocket.js > nats-websocket.js
