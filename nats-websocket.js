@@ -1348,7 +1348,7 @@ var NATS = (function(){
 
     stream.onclose =  function(evt) {
       client.closeStream();
-      client.emit('disconnect', evt);
+      client.emit('disconnect', evt.code && evt.code >= 4000 ? evt.code - 4000 : evt.code, evt.reason);
       if (client.closed === true ||
           client.options.reconnect === false ||
           client.reconnects >= client.options.maxReconnectAttempts) {
@@ -1387,10 +1387,10 @@ var NATS = (function(){
         case AWAITING_CONTROL:
           if ((m = MSG.exec(client.inbound)) != null) {
             client.payload = {
-              subj : m[1],
-              sid : m[2],
+              subj  : m[1],
+              sid   : m[2],
               reply : m[4],
-              size : parseInt(m[5], 10)
+              size  : parseInt(m[5], 10)
             };
             client.pstate = AWAITING_MSG_PAYLOAD;
           } else if ((m = OK.exec(client.inbound)) != null) {
